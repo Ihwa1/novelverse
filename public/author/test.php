@@ -1,0 +1,2 @@
+<?php
+echo "AUTHOR FOLDER PHP WORKS";

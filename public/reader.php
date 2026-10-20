@@ -19,6 +19,16 @@
 <script>
   const chapterId = new URLSearchParams(location.search).get('chapterId');
 
+  // 💓 Heartbeat — records the read so trending/popular/Top Readers come alive.
+  // Fire-and-forget: failures are silently ignored (guests, migration not run, etc.)
+  function trackProgress(seriesId, chId) {
+    fetch('api/progress.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ series_id: seriesId, chapter_id: chId })
+    }).catch(() => {});   // never let tracking break the reading experience
+  }
+
   (async () => {
     const box = document.getElementById('reader');
 
@@ -27,22 +37,51 @@
       const c = res.data;
 
       // Pages: local pages_json first, else fetch live from MangaDex via external_id
+            // Pages / content priority:
+      // 1. Local pages_json
+      // 2. Local text content (novels)
+      // 3. Live fetch from external source (mangadex / manhwa / novel)
       let pages = c.pages;
-      if ((!pages || !pages.length) && c.external_id) {
-        const md = await api(`mangadex.php?action=pages&chapterId=${c.external_id}`);
-        pages = md.data.pages;
+      let textContent = c.content || null;
+
+      if ((!pages || !pages.length) && !textContent && c.external_id) {
+        const source = c.external_source || 'mangadex';
+
+        if (source === 'manhwa') {
+          const mh = await api(`manhwa.php?action=pages&chapterId=${c.external_id}`);
+          pages = mh.data?.pages || [];
+        } else if (source === 'novel' || source === 'gutendex') {
+          const nv = await api(`novels.php?action=content&chapterId=${c.external_id}`);
+          textContent = nv.data?.content || null;
+        } else {
+          // default = MangaDex
+          const md = await api(`mangadex.php?action=pages&chapterId=${c.external_id}`);
+          pages = md.data?.pages || [];
+        }
       }
 
       if (pages && pages.length) {
         box.innerHTML = pages.map(p => `<img src="${p}" loading="lazy">`).join('');
-        // ✅ Progress tracking now works for imported chapters too — they're real DB rows!
         trackProgress(c.series_id, c.id);
         buildNav(c);
         return;
       }
 
+      if (textContent) {
+  box.innerHTML = `
+    <div class="novel-reader-wrap">
+      <article class="novel-text">
+        ${textContent.replace(/\n/g, '<br>')}
+      </article>
+    </div>`;
+  trackProgress(c.series_id, c.id);
+  buildNav(c);
+  return;
+}
+        
+
       box.innerHTML = '<p class="text-muted-nv text-center py-5">No pages found for this chapter.</p>';
-      buildNav(c);
+      buildNav(c); 
 
     } catch (e) {
       // 🔒 Locked chapter → show unlock prompt with your buy flow
@@ -122,6 +161,35 @@
   transition: opacity 0.25s ease;
 }
 .reader-nav.show { opacity: 1; pointer-events: auto; }
+
+.novel-reader-wrap {
+  background: #f5f0e8;
+  min-height: 70vh;
+  padding: 2rem 1rem 5rem;
+  border-radius: 12px;
+}
+
+.novel-text {
+  max-width: 720px;
+  margin: 0 auto;
+  background: #fffef9;
+  color: #1a1a1a;
+  padding: 2.5rem 2rem;
+  line-height: 1.9;
+  font-size: 1.1rem;
+  font-family: Georgia, "Times New Roman", serif;
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+  white-space: normal;
+  word-wrap: break-word;
+}
+
+@media (max-width: 576px) {
+  .novel-text {
+    padding: 1.5rem 1rem;
+    font-size: 1rem;
+  }
+}
 </style>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

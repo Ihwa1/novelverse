@@ -50,3 +50,13 @@ function require_admin(): array {
     if (empty($u['is_admin'])) json_out(['error' => 'Admins only'], 403);
     return $u;
 }
+function require_author(): array
+{
+    $user = require_user();
+
+    if (!in_array($user['role'] ?? '', ['author', 'admin'], true)) {
+        json_out(['error' => 'Approved author access required'], 403);
+    }
+
+    return $user;
+}

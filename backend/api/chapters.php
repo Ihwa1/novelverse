@@ -60,6 +60,7 @@ json_out(['data' => [
     'external_id' => $chapter['external_id'] ?? null,   // ✅ MangaDex UUID for live pages
     'pages'       => $chapter['pages_json'] ? json_decode($chapter['pages_json'], true) : null,
     'content'     => $chapter['content'],
+    'external_source' => $series['external_source'] ?? null,
 
     // 🧭 NEW: nav data — reader.php's buildNav() reads these
     'prev'     => $prevCh ?: null,
