@@ -12,14 +12,44 @@ $coverDir = __DIR__ . '/../../public/uploads/covers/';
 $chapDir  = __DIR__ . '/../../public/uploads/chapters/';
 foreach ([$coverDir, $chapDir] as $d) if (!is_dir($d)) mkdir($d, 0777, true);
 
+
 function save_image(array $file, string $dir): string {
-    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-    if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif']))
-        json_out(['error' => 'Only jpg / png / webp / gif images allowed'], 422);
-    $name = bin2hex(random_bytes(8)) . '.' . $ext;   // random name = no collisions
-    move_uploaded_file($file['tmp_name'], $dir . $name);
+    if (
+        !isset($file['error'], $file['tmp_name'], $file['name']) ||
+        $file['error'] !== UPLOAD_ERR_OK ||
+        !is_uploaded_file($file['tmp_name'])
+    ) {
+        json_out(['error' => 'Image upload failed'], 422);
+    }
+
+    $ext = strtolower(
+        pathinfo($file['name'], PATHINFO_EXTENSION)
+    );
+
+    $allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+
+    if (!in_array($ext, $allowed, true)) {
+        json_out([
+            'error' => 'Only JPG, PNG, WebP, and GIF images are allowed'
+        ], 422);
+    }
+
+    $imageInfo = getimagesize($file['tmp_name']);
+
+    if ($imageInfo === false) {
+        json_out(['error' => 'The uploaded file is not a valid image'], 422);
+    }
+
+    $name = bin2hex(random_bytes(16)) . '.' . $ext;
+    $destination = $dir . $name;
+
+    if (!move_uploaded_file($file['tmp_name'], $destination)) {
+        json_out(['error' => 'Could not save the uploaded image'], 500);
+    }
+
     return $name;
 }
+
 
 // ── Create a series: POST upload.php?action=series (multipart form) ──
 if ($action === 'series' && $_SERVER['REQUEST_METHOD'] === 'POST') {

@@ -45,8 +45,23 @@ function require_user(): array {
 function slugify(string $s): string {
     return trim(strtolower(preg_replace('/[^a-z0-9]+/i', '-', $s)), '-');
 }
+
 function require_admin(): array {
     $u = require_user();
-    if (empty($u['is_admin'])) json_out(['error' => 'Admins only'], 403);
+
+    if (($u['role'] ?? '') !== 'admin') {
+        json_out(['error' => 'Admins only'], 403);
+    }
+
+    return $u;
+}
+
+function require_author(): array {
+    $u = require_user();
+
+    if (($u['role'] ?? '') !== 'author') {
+        json_out(['error' => 'Approved authors only'], 403);
+    }
+
     return $u;
 }
