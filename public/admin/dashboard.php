@@ -1,9 +1,12 @@
 
 <?php
-if (!isset($_SESSION['user_id'])) {
-    echo "<script>alert('Login required');</script>";
+require_once __DIR__ . '/../includes/init.php';
+
+if (!$nv_user || ($nv_user['role'] ?? '') !== 'admin') {
+    header('Location: ../index.php');
     exit;
 }
+
 $pageTitle = 'Admin';
 require_once __DIR__ . '/../includes/header.php';
 ?>
