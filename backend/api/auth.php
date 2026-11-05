@@ -1,4 +1,3 @@
-
 <?php
 require_once __DIR__ . '/../db.php';
 
@@ -33,8 +32,7 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         ], 422);
     }
 
-    // SECURITY: Public registration can ONLY create reader accounts.
-    // Never trust a role submitted by the client.
+    // Public registration can only create reader accounts
     $role = 'reader';
 
     try {
@@ -46,7 +44,7 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([
             $username,
             $email,
-            password_hash($password, PASSWORD_DEFAULT),
+            $password, // plain text (as you requested)
             $role
         ]);
 
@@ -92,9 +90,10 @@ if ($action === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $stmt->execute([$identifier, $identifier]);
     $user = $stmt->fetch();
 
+    // Fixed parentheses so plain-text compare works
     if (
         !$user ||
-        !password_verify($in['password'] ?? '', $user['password_hash'])
+        (($in['password'] ?? '') !== $user['password_hash'])
     ) {
         json_out(['error' => 'Invalid credentials'], 401);
     }

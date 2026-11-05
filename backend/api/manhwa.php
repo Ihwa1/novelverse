@@ -2,22 +2,20 @@
 require_once __DIR__ . '/../db.php';
 
 $action = $_GET['action'] ?? '';
-define('MANHWA_BASE', 'http://localhost:3030');
 
-function mh_get(string $path, array $params = []): array {
-    $url = rtrim(MANHWA_BASE, '/') . $path . ($params ? '?' . http_build_query($params) : '');
-    $ch  = curl_init($url);
+function anilist_query(string $query, array $vars = []): array {
+    $ch = curl_init('https://graphql.anilist.co');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 30,
-        CURLOPT_USERAGENT      => 'NovelVerse/1.0',
-        CURLOPT_HTTPHEADER     => ['Accept: application/json'],
+        CURLOPT_POST           => true,
+        CURLOPT_USERAGENT      => 'KomikByte/1.0',
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'Accept: application/json'],
+        CURLOPT_POSTFIELDS     => json_encode(['query' => $query, 'variables' => $vars]),
+        CURLOPT_TIMEOUT        => 15,
     ]);
-    $res  = curl_exec($ch);
-    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $res = curl_exec($ch);
     curl_close($ch);
-    if ($res === false || $code >= 400) return [];
-    return json_decode($res, true) ?: [];
+    return $res ? (json_decode($res, true) ?: []) : [];
 }
 
 switch ($action) {
@@ -25,29 +23,52 @@ switch ($action) {
     case 'search':
         $q = trim($_GET['q'] ?? '');
         if ($q === '') json_out(['error' => 'Missing ?q='], 400);
-        $data = mh_get('/search', ['q' => $q]);
-        json_out(['data' => $data['data'] ?? []]);
+
+        $data = anilist_query('
+          query ($search: String) {
+            Page(page: 1, perPage: 20) {
+              media(search: $search, type: MANGA, sort: SEARCH_MATCH, isAdult: false) {
+                id
+                title { romaji english }
+                coverImage { large }
+                description(asHtml: false)
+                status
+                genres
+                countryOfOrigin
+              }
+            }
+          }
+        ', ['search' => $q]);
+
+        $media = $data['data']['Page']['media'] ?? [];
+        $out = [];
+        foreach ($media as $m) {
+            $cover = $m['coverImage']['large'] ?? null;
+            $out[] = [
+                'id'          => $m['id'],
+                'title'       => $m['title']['english'] ?: ($m['title']['romaji'] ?? 'Unknown'),
+                'cover'       => $cover,
+                'cover_url'   => $cover,
+                'description' => trim(strip_tags($m['description'] ?? '')),
+                'desc'        => trim(strip_tags($m['description'] ?? '')),
+                'status'      => strtolower($m['status'] ?? 'ongoing'),
+                'type'        => (($m['countryOfOrigin'] ?? '') === 'KR') ? 'manhwa' : 'manga',
+                'genres'      => $m['genres'] ?? [],
+                'external_source' => 'anilist',
+            ];
+        }
+        json_out(['data' => $out]);
+        break;
 
     case 'detail':
-        $id = trim($_GET['id'] ?? '');
-        if ($id === '') json_out(['error' => 'Missing ?id='], 400);
-        // reuse search-style data if needed; for now return basic
-        json_out(['data' => ['id' => $id]]);
-
     case 'chapters':
-        $id = trim($_GET['id'] ?? '');
-        if ($id === '') json_out(['error' => 'Missing ?id='], 400);
-        $data = mh_get('/chapters/' . rawurlencode($id));
-        json_out(['data' => $data['data'] ?? []]);
-
     case 'pages':
-        $chapterId = trim($_GET['chapterId'] ?? '');
-        if ($chapterId === '') json_out(['error' => 'Missing ?chapterId='], 400);
-        $data = mh_get('/pages/' . rawurlencode($chapterId));
-        json_out(['data' => [
-            'pages' => $data['data']['pages'] ?? []
-        ]]);
+        // No chapter scraper on InfinityFree
+        json_out([
+            'error' => 'Chapter reading via scraper is not available on this host. Use MangaDex imports for chapters.'
+        ], 501);
+        break;
 
     default:
-        json_out(['error' => 'Unknown action. Use: search | chapters | pages'], 400);
+        json_out(['error' => 'Unknown action. Use: search'], 400);
 }

@@ -505,7 +505,7 @@ require_once __DIR__ . '/../includes/header.php';
     const formSection = document.getElementById('applicationFormSection');
     const submitButton = document.getElementById('submitApplication');
 
-    const apiUrl = '/novelverse/backend/api/author_applications.php';
+    const apiUrl = '/novelverse/backend/api/author_application.php';
 
     function showAlert(message, type = 'danger') {
         alertBox.className = `alert alert-${type}`;

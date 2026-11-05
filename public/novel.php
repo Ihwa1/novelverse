@@ -1,105 +1,144 @@
-<?php $pageTitle = 'Read Novel'; require_once __DIR__ . '/includes/header.php'; ?>
+<?php $pageTitle = 'Manage Series'; require_once __DIR__ . '/includes/header.php'; ?>
+<?php if (!$nv_user || (($nv_user['role'] ?? '') !== 'author' && (int)($nv_user['is_admin'] ?? 0) !== 1)): ?>
+  <div class="container py-5 text-center"><h4 class="text-white">✍️ Authors only</h4></div>
+<?php else: ?>
 
-<main class="container py-4" id="novel">
-  <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
-</main>
+<?php
+$pdo = pub_db();
+$slug = $_GET['slug'] ?? '';
+$st = $pdo->prepare('SELECT * FROM series WHERE slug = ?');
+$st->execute([$slug]);
+$series = $st->fetch();
+if (!$series || ((int)$series['created_by'] !== (int)$nv_user['id'] && (int)($nv_user['is_admin'] ?? 0) !== 1)) {
+    echo '<div class="container py-5 text-center"><h4 class="text-white">Series not found or not yours 🔒</h4></div>';
+    require_once __DIR__ . '/includes/footer.php';
+    exit;
+}
+$ch = $pdo->prepare('SELECT id, chapter_number, title, is_free, views FROM chapters WHERE series_id = ? ORDER BY CAST(chapter_number AS UNSIGNED) ASC');
+$ch->execute([$series['id']]);
+$chapters = $ch->fetchAll();
+$nextNum = 1;
+foreach ($chapters as $c) $nextNum = max($nextNum, (int)$c['chapter_number'] + 1);
+$isNovel = (int)$series['is_novel'] === 1;
+?>
 
-<div class="modal fade" id="payModal" data-bs-backdrop="static">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content p-2">
-      <div class="modal-header border-0">
-        <h5 class="modal-title text-white"><i class="bi bi-lock-fill me-2"></i>Unlock Full Book</h5>
-        <button class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body text-center">
-        <p id="payInfo" class="text-muted-nv"></p>
-        <h3 class="text-white mb-3" id="payPrice"></h3>
-        <button class="btn btn-gcash w-100 mb-2 py-2" onclick="pay('gcash')">
-          <i class="bi bi-wallet2 me-2"></i>Pay with GCash
-        </button>
-        <button class="btn btn-card-pay w-100 py-2" onclick="pay('card')">
-          <i class="bi bi-credit-card me-2"></i>Debit / Credit Card
-        </button>
-        <small class="text-muted-nv d-block mt-3">
-          <i class="bi bi-shield-lock me-1"></i>One-time purchase — unlocks ALL remaining chapters forever
-        </small>
-      </div>
+<main class="container py-4" style="max-width: 800px;">
+  <h3 class="text-white mb-1"><?= htmlspecialchars($series['title']) ?></h3>
+  <p class="text-white-50 mb-2"><?= $isNovel ? '📖 Light Novel' : '🖼️ Comic' ?> • <?= count($chapters) ?> chapters • first <?= (int)$series['free_chapters'] ?> free</p>
+
+  <!-- 🔄 NEW: Back to dashboard button -->
+  <a href="profile.php" class="btn btn-outline-light btn-sm mb-4">← Back to My Series</a>
+
+  <!-- Existing chapters -->
+  <h5 class="text-white mb-3">📚 Published Chapters</h5>
+  <?php if (!$chapters): ?>
+    <p class="text-white-50 mb-4">No chapters yet — add the first one below!</p>
+  <?php else: ?>
+    <div class="nv-card p-3 mb-4">
+      <?php foreach ($chapters as $ch): ?>
+  <div class="d-flex justify-content-between align-items-center border-bottom py-2">
+    <span>Ch. <?= (int)$ch['chapter_number'] ?> <?= htmlspecialchars($ch['title'] ?? '') ?></span>
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge bg-<?= $ch['is_free'] ? 'success' : 'warning' ?>"><?= $ch['is_free'] ? 'free' : 'paid' ?></span>
+      <button class="btn btn-outline-light btn-sm py-0 toggle-ch"
+              data-id="<?= (int)$ch['id'] ?>" data-free="<?= (int)$ch['is_free'] ?>"
+              title="Toggle free/paid">🔄</button>
+      <button class="btn btn-outline-danger btn-sm py-0 delete-ch"
+              data-id="<?= (int)$ch['id'] ?>" title="Delete chapter">🗑️</button>
     </div>
   </div>
-</div>
+<?php endforeach; ?>
+    </div>
+  <?php endif; ?>
+
+  <!-- Add chapter form -->
+  <h5 class="text-white mb-3">➕ Add a Chapter</h5>
+  <form id="chapterForm" class="nv-card p-4">
+    <input type="hidden" name="series_id" value="<?= $series['id'] ?>">
+    <div class="row">
+      <div class="col-4 mb-3">
+        <label class="form-label text-white">Chapter # *</label>
+        <input name="chapter_number" class="form-control" value="<?= $nextNum ?>" required>
+      </div>
+      <div class="col-8 mb-3">
+        <label class="form-label text-white">Chapter title</label>
+        <input name="title" class="form-control" placeholder="Optional">
+      </div>
+    </div>
+
+    <?php if ($isNovel): ?>
+      <div class="mb-3">
+        <label class="form-label text-white">Chapter text *</label>
+        <textarea name="content" class="form-control" rows="12" placeholder="Write or paste the chapter text here..."></textarea>
+      </div>
+    <?php else: ?>
+      <!-- 🔄 NEW: MangaDex import option (comics only) -->
+      <div class="mb-3">
+        <label class="form-label text-white">🔄 OR MangaDex Chapter ID <span class="text-white-50">(leave empty for local upload)</span></label>
+        <input name="md_chapter_id" class="form-control" placeholder="e.g. f4fa82a7-4c09-4906-bcf3-60fda30bae54">
+        <small class="text-white-50">Grab it from the chapter's URL on MangaDex. If filled, page files below are ignored.</small>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label text-white">Page images (select multiple, in order)</label>
+        <input name="pages[]" type="file" accept="image/*" multiple class="form-control">
+        <small class="text-white-50">Pages appear in the order you select them</small>
+      </div>
+    <?php endif; ?>
+
+    <div id="err" class="text-danger mb-2" style="display:none;"></div>
+    <button class="btn btn-nv w-100">📤 Upload Chapter</button>
+  </form>
+</main>
 
 <script src="js/app.js"></script>
 <script>
-  const params = new URLSearchParams(location.search);
-  const slug = params.get('slug');
-  let series;
+  const API_BASE = '../backend/api/';   // ⚠️ same as upload.php — match your api() base
 
-  async function load() {
-    const res = await api(`series.php?slug=${slug}`);
-    series = res.data;
-
-    document.getElementById('novel').innerHTML = `
-      <div class="row g-4 mb-4">
-        <div class="col-md-3 col-5">
-          <img src="${series.cover_url}" class="img-fluid rounded shadow">
-        </div>
-        <div class="col-md-9 col-7">
-          <span class="type-badge novel inline">NOVEL</span>
-          <h1 class="text-white mt-2">${series.title}</h1>
-          <p class="text-muted-nv">${series.description || ''}</p>
-          ${series.owned
-            ? `<span class="tag owned"><i class="bi bi-check-circle me-1"></i>PURCHASED — ALL CHAPTERS UNLOCKED</span>`
-            : `<button class="btn btn-gcash mt-2" onclick="openPaywall()">
-                 <i class="bi bi-bag me-1"></i>Buy Full Book — ₱${series.novel_price}</button>`}
-        </div>
-      </div>
-      <h4 class="section-title mb-3">Chapters</h4>
-      <div id="chList"></div>`;
-
-    document.getElementById('chList').innerHTML = series.chapters.map(c => `
-      <a class="chapter-item" href="novel.php?slug=${slug}&ch=${c.id}">
-        <span><i class="bi bi-file-text me-2 text-primary"></i>
-          Chapter ${c.chapter_number} — ${c.title || ''}</span>
-        ${c.is_free
-          ? '<span class="tag free">FREE</span>'
-          : (series.owned
-              ? '<span class="tag owned">UNLOCKED</span>'
-              : '<span class="tag locked"><i class="bi bi-lock-fill"></i> PURCHASE</span>')}
-      </a>`).join('');
-
-    const ch = params.get('ch');
-    if (ch) readChapter(ch);
-  }
-
-  async function readChapter(id) {
+  document.getElementById('chapterForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = document.getElementById('err');
+    err.style.display = 'none';
     try {
-      const res = await api(`chapters.php?id=${id}`);
-      document.getElementById('novel').innerHTML = `
-        <a href="novel.php?slug=${slug}" class="btn btn-outline-nv btn-sm mb-3">
-          <i class="bi bi-arrow-left me-1"></i>Back to chapters</a>
-        <h2 class="text-white">Chapter ${res.data.number} ${res.data.title || ''}</h2>
-        <hr style="border-color:var(--nv-navy-700)">
-        <div class="novel-text py-4">${res.data.content.replace(/\n/g, '<br>')}</div>`;
-      window.scrollTo(0, 0);
-    } catch (e) {
-      if (e.status === 402 && e.json.locked) openPaywall(e.json);
+      const fd = new FormData(e.target);
+      // 🔄 ensure md_chapter_id is always sent (empty string = local upload mode)
+      if (!fd.has('md_chapter_id')) fd.append('md_chapter_id', '');
+      const r = await fetch(API_BASE + 'upload.php?action=chapter', { method: 'POST', body: fd });
+      const res = await r.json();
+      if (!r.ok) throw new Error(res.error || 'Upload failed');
+      location.reload();   // refresh to show the new chapter
+    } catch (ex) {
+      err.textContent = ex.message;
+      err.style.display = '';
     }
-  }
+  });
+</script>
+<script>
+document.querySelectorAll('.toggle-ch').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const fd = new FormData();
+    fd.append('chapter_id', btn.dataset.id);
+    fd.append('action', 'toggle');
+    const r = await fetch('../backend/api/chapter_actions.php', { method: 'POST', body: fd });
+    const res = await r.json();
+    if (res.ok) location.reload();          // 🔄 refresh to show new free/paid state
+    else alert(res.error || 'Toggle failed');
+  });
+});
 
-  function openPaywall(info) {
-    document.getElementById('payInfo').textContent =
-      info?.message || 'Free preview ended. Buy the full book to unlock all remaining chapters.';
-    document.getElementById('payPrice').textContent = '₱' + (info?.price || series.novel_price);
-    new bootstrap.Modal('#payModal').show();
-  }
-
-  async function pay(method) {
-    try {
-      await buyNovel(series.id, method);
-    } catch (e) { alert(e.message); }
-  }
-
-  load();
+document.querySelectorAll('.delete-ch').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (!confirm('Delete this chapter for real? 🗑️')) return;
+    const fd = new FormData();
+    fd.append('chapter_id', btn.dataset.id);
+    fd.append('action', 'delete');
+    const r = await fetch('../backend/api/chapter_actions.php', { method: 'POST', body: fd });
+    const res = await r.json();
+    if (res.ok) location.reload();
+    else alert(res.error || 'Delete failed');
+  });
+});
 </script>
 
+<?php endif; ?>
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

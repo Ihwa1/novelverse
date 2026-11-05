@@ -22,7 +22,6 @@
           <option value="manhwa">Manhwa</option>
           <option value="manhua">Manhua</option>
           <option value="manga">Manga</option>
-          <option value="novel">Light Novel</option>
         </select>
       </div>
       <div class="col-6 mb-3">

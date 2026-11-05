@@ -1,69 +1,108 @@
 <?php
 require_once __DIR__ . '/../db.php';
 $pdo = db();
+
 $id = (int)($_GET['id'] ?? 0);
 
 $stmt = $pdo->prepare('SELECT * FROM chapters WHERE id = ?');
 $stmt->execute([$id]);
 $chapter = $stmt->fetch();
-if (!$chapter) json_out(['error' => 'Not found'], 404);
+if (!$chapter) {
+    json_out(['error' => 'Not found'], 404);
+}
 
 $s = $pdo->prepare('SELECT * FROM series WHERE id = ?');
 $s->execute([$chapter['series_id']]);
 $series = $s->fetch();
 
-// ✅ CHANGED: gate applies to ANY locked chapter (novels AND imported manhwa/manhua)
-// 🔒 Lock only if chapter is paid AND the series actually charges money
-$price = (float)($series['novel_price'] ?? 0);
-if (!$chapter['is_free'] && $price > 0) {
+// ── Coin lock (Webtoon-style) ──────────────────────────────
+$coinPrice = (int)($chapter['coin_price'] ?? 0);
+$isFree    = !empty($chapter['is_free']) || $coinPrice <= 0;
+
+if (!$isFree) {
     $user = current_user();
-    $owned = false;
-    if ($user) {
-        $p = $pdo->prepare("SELECT 1 FROM purchases WHERE user_id = ? AND series_id = ? AND status = 'paid'");
-        $p->execute([$user['id'], $series['id']]);
-        $owned = (bool)$p->fetch();
-    }
-    if (!$owned) {
+
+    if (!$user) {
         json_out([
-            'locked'   => true,
-            'message'  => 'Free preview ended. Unlock this chapter to keep reading.',
-            'price'    => $series['novel_price'],
-            'series'   => ['id' => $series['id'], 'title' => $series['title']]
-        ], 402); // 402 Payment Required
+            'locked'     => true,
+            'reason'     => 'login',
+            'message'    => 'Log in to unlock this chapter.',
+            'coin_price' => $coinPrice,
+            'chapter_id' => (int)$chapter['id'],
+            'series'     => [
+                'id'    => (int)$series['id'],
+                'title' => $series['title']
+            ]
+        ], 402);
+    }
+
+    $uid = (int)$user['id'];
+
+    // Already unlocked with coins?
+    $st = $pdo->prepare(
+        'SELECT 1 FROM chapter_unlocks WHERE user_id = ? AND chapter_id = ?'
+    );
+    $st->execute([$uid, $chapter['id']]);
+    $unlocked = (bool)$st->fetch();
+
+    if (!$unlocked) {
+        $st = $pdo->prepare('SELECT balance FROM wallets WHERE user_id = ?');
+        $st->execute([$uid]);
+        $balance = (int)($st->fetchColumn() ?: 0);
+
+        json_out([
+            'locked'     => true,
+            'reason'     => 'coins',
+            'message'    => 'Unlock this chapter with coins.',
+            'coin_price' => $coinPrice,
+            'balance'    => $balance,
+            'chapter_id' => (int)$chapter['id'],
+            'series'     => [
+                'id'    => (int)$series['id'],
+                'title' => $series['title']
+            ]
+        ], 402);
     }
 }
 
-// 🧭 NEW: prev / next chapter + full chapter list for the reader nav
-$st = $pdo->prepare('SELECT id, chapter_number FROM chapters
-                     WHERE series_id = ? AND chapter_number < ?
-                     ORDER BY chapter_number DESC LIMIT 1');
+// ── Prev / next / chapter list ─────────────────────────────
+$st = $pdo->prepare(
+    'SELECT id, chapter_number FROM chapters
+     WHERE series_id = ? AND chapter_number < ?
+     ORDER BY chapter_number DESC LIMIT 1'
+);
 $st->execute([$chapter['series_id'], $chapter['chapter_number']]);
 $prevCh = $st->fetch();
 
-$st = $pdo->prepare('SELECT id, chapter_number FROM chapters
-                     WHERE series_id = ? AND chapter_number > ?
-                     ORDER BY chapter_number ASC LIMIT 1');
+$st = $pdo->prepare(
+    'SELECT id, chapter_number FROM chapters
+     WHERE series_id = ? AND chapter_number > ?
+     ORDER BY chapter_number ASC LIMIT 1'
+);
 $st->execute([$chapter['series_id'], $chapter['chapter_number']]);
 $nextCh = $st->fetch();
 
-$st = $pdo->prepare('SELECT id, chapter_number, chapter_number AS number, title FROM chapters
-                     WHERE series_id = ? ORDER BY chapter_number ASC');
+$st = $pdo->prepare(
+    'SELECT id, chapter_number, chapter_number AS number, title, is_free, coin_price
+     FROM chapters
+     WHERE series_id = ?
+     ORDER BY chapter_number ASC'
+);
 $st->execute([$chapter['series_id']]);
 $allChapters = $st->fetchAll();
 
 json_out(['data' => [
-    'id'          => $chapter['id'],
-    'series_id'   => (int)$chapter['series_id'],
-    'number'      => $chapter['chapter_number'],
-    'title'       => $chapter['title'],
-    'is_free'     => (bool)$chapter['is_free'],
-    'external_id' => $chapter['external_id'] ?? null,   // ✅ MangaDex UUID for live pages
-    'pages'       => $chapter['pages_json'] ? json_decode($chapter['pages_json'], true) : null,
-    'content'     => $chapter['content'],
+    'id'              => $chapter['id'],
+    'series_id'       => (int)$chapter['series_id'],
+    'number'          => $chapter['chapter_number'],
+    'title'           => $chapter['title'],
+    'is_free'         => (bool)$chapter['is_free'],
+    'coin_price'      => (int)($chapter['coin_price'] ?? 0),
+    'external_id'     => $chapter['external_id'] ?? null,
+    'pages'           => $chapter['pages_json'] ? json_decode($chapter['pages_json'], true) : null,
+    'content'         => $chapter['content'],
     'external_source' => $series['external_source'] ?? null,
-
-    // 🧭 NEW: nav data — reader.php's buildNav() reads these
-    'prev'     => $prevCh ?: null,
-    'next'     => $nextCh ?: null,
-    'chapters' => $allChapters,
+    'prev'            => $prevCh ?: null,
+    'next'            => $nextCh ?: null,
+    'chapters'        => $allChapters,
 ]]);
